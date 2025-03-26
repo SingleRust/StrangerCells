@@ -3,8 +3,8 @@
 /// but the general approach presented in the paper stayed the same. (This is also the reason why most of the names stayed the same for convenience.
 use crate::algorithm::{call_doublets, knn_classifier, random_sample_and_recombine, run_pca};
 use crate::utils::{arr1_conversion, combine_two_arrays};
-use anndata::data::DynCsrMatrix;
 use anndata::ArrayData;
+use anndata::data::DynCsrMatrix;
 use anndata_memory::IMAnnData;
 use anyhow::anyhow;
 use kiddo::traits::DistanceMetric;
@@ -27,7 +27,7 @@ pub(crate) mod utils;
 #[derive(Clone, Debug)]
 pub enum DistanceMeasure {
     SquaredEuclidean,
-    Manhattan
+    Manhattan,
 }
 
 #[derive(Clone, Debug)]
@@ -50,7 +50,7 @@ pub struct StrangerCellsParams {
 pub fn run_doublet_removal<T, const K: usize>(
     adata: &IMAnnData,
     params: StrangerCellsParams,
-    distance_measure: DistanceMeasure
+    distance_measure: DistanceMeasure,
 ) -> anyhow::Result<(Vec<bool>, Array1<T>, T, T, T, T)>
 where
     T: Float
@@ -81,8 +81,12 @@ where
                         detectable_doublet_fraction,
                         overall_doublet_rate,
                     ) = match distance_measure {
-                        DistanceMeasure::SquaredEuclidean => { doublet_remove::<f32, K, SquaredEuclidean>(csr, params) }
-                        DistanceMeasure::Manhattan => { doublet_remove::<f32, K, Manhattan>(csr, params) }
+                        DistanceMeasure::SquaredEuclidean => {
+                            doublet_remove::<f32, K, SquaredEuclidean>(csr, params)
+                        }
+                        DistanceMeasure::Manhattan => {
+                            doublet_remove::<f32, K, Manhattan>(csr, params)
+                        }
                     }?;
                     let z_scores: Array1<T> = arr1_conversion(z_scores)?;
                     let threshold = T::from(threshold).unwrap();
@@ -107,8 +111,12 @@ where
                         detectable_doublet_fraction,
                         overall_doublet_rate,
                     ) = match distance_measure {
-                        DistanceMeasure::SquaredEuclidean => { doublet_remove::<f64, K, SquaredEuclidean>(csr, params) }
-                        DistanceMeasure::Manhattan => { doublet_remove::<f64, K, Manhattan>(csr, params) }
+                        DistanceMeasure::SquaredEuclidean => {
+                            doublet_remove::<f64, K, SquaredEuclidean>(csr, params)
+                        }
+                        DistanceMeasure::Manhattan => {
+                            doublet_remove::<f64, K, Manhattan>(csr, params)
+                        }
                     }?;
                     let z_scores: Array1<T> = arr1_conversion(z_scores)?;
                     let threshold = T::from(threshold).unwrap();
@@ -124,12 +132,15 @@ where
                         overall_doublet_rate,
                     ))
                 }
-                other => Err(anyhow!("This CSRMatrix datatype is currently not supported for StrangerCells detection. Please convert the matrix with the appropriate SingleRust function int f32 or f64.")) // TODO: add error code
+                other => Err(anyhow!(
+                    "This CSRMatrix datatype is currently not supported for StrangerCells detection. Please convert the matrix with the appropriate SingleRust function int f32 or f64."
+                )), // TODO: add error code
             }
         }
-        other => Err(anyhow!("This matrix type is currently not supported for StrangerCells detection. Please use a CSRMatrix in the f32 or f64 format!")) // TODO: add error code
+        other => Err(anyhow!(
+            "This matrix type is currently not supported for StrangerCells detection. Please use a CSRMatrix in the f32 or f64 format!"
+        )), // TODO: add error code
     }
-
 }
 
 fn doublet_remove<T, const K: usize, D>(
