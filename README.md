@@ -95,4 +95,3 @@ All rights reserved.
 ## Acknowledgments 👏
 
 - Original Scrublet algorithm by Samuel L. Wolock, et al.
-- SingleRust ecosystem for Rust-based single-cell analysis
