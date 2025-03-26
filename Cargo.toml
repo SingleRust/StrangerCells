@@ -1,0 +1,32 @@
+[package]
+name = "stranger_cells"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "stranger_cells"
+path = 'src/lib.rs'
+
+[[bin]]
+name = 'stranger_cells_bin'
+path = "src/main.rs"
+
+[dependencies]
+anndata = "0.6.1"
+anndata-memory = "0.1.2-alpha.0"
+single_rust = { version = "0.2.3-alpha.2", optional = true }
+ndarray = { version = "0.16.1", features = ["rayon"] }
+nalgebra-sparse = "0.10.0"
+anyhow = "1.0.86"
+num-traits = "0.2.19"
+rand = "0.8.5"
+rand_distr = "0.4.3"
+log = "0.4.22"
+kdtree = "0.7.0"
+polars = { version = "0.45.1", features = ["lazy", "ndarray"] }
+rayon = "1.9.0"
+single_algebra = { version = "0.2.3-alpha.0", features = ["network"] }
+single-svdlib = "0.2.0"
+kiddo = { version = "5.0.3" }
+
+
