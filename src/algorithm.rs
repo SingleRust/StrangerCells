@@ -3,7 +3,8 @@ use anyhow::anyhow;
 use kiddo::KdTree;
 use kiddo::traits::DistanceMetric;
 use nalgebra_sparse::{CooMatrix, CsrMatrix};
-use ndarray::Array2;
+use ndarray::{Array1, Array2};
+use num_traits::real::Real;
 use num_traits::{Float, FromPrimitive, One, Zero};
 use rand::SeedableRng;
 use rand::distributions::Uniform;
@@ -139,10 +140,9 @@ where
 
 fn build_knn_tree<T, const K: usize>(data: &Array2<T>) -> anyhow::Result<KdTree<T, K>>
 where
-    T: Float + Default + AddAssign + Debug + num_traits::float::FloatCore + Send + Sync,
+    T: Default + AddAssign + Debug + num_traits::float::FloatCore + Send + Sync,
 {
     let nrows = data.nrows() as u64;
-    let ncols = data.ncols();
     let mut kdtree: KdTree<T, K> = KdTree::new();
 
     for i in 0..nrows {
@@ -157,63 +157,102 @@ where
 
 pub(crate) fn knn_classifier<T, const K: usize, D>(
     data: &Array2<T>,
-    vec_sim: &Vec<bool>,
+    vec_sim: &[bool],
     n_neighbors: usize,
     exp_doublet_rate: f32,
-    stddev_doublet_rate: f32
-) -> anyhow::Result<()>
+    stddev_doublet_rate: f32,
+) -> anyhow::Result<(Array1<T>, Array1<T>, Array1<T>, Array1<T>)>
 where
-    T: Float + Default + AddAssign + Debug + num_traits::float::FloatCore + Send + Sync,
+    T: Default
+        + AddAssign
+        + Debug
+        + num_traits::float::FloatCore
+        + Send
+        + Sync
+        + FromPrimitive
+        + Float,
     D: DistanceMetric<T, K>,
 {
-    let mut ind_obs = Vec::new();
-    let mut ind_sim = Vec::new();
-    for (ind, &v) in vec_sim.iter().enumerate() {
-        if v {
-            ind_obs.push(ind as u64);
-        } else {
-            ind_sim.push(ind as u64);
-        }
-    }
-    let n_sim = ind_sim.len() as f32;
-    let n_obs = ind_obs.len() as f32;
-    let n_frac = n_sim / n_obs;
+    let n_obs = vec_sim.iter().filter(|&&x| !x).count();
+    let n_sim = vec_sim.iter().filter(|&&x| x).count();
+    let n_total = n_obs + n_sim;
+
+    let n_frac = (n_sim as f32) / (n_obs as f32);
     let k_adj = ((n_neighbors as f32) * (1.0 + n_frac)).round() as usize;
+
     let kdtree = build_knn_tree::<T, K>(data)?;
 
-    for i in 0..data.nrows() {
-        // look at all cells, generated and generous
+    let mut all_scores = Array1::zeros(n_total);
+    let mut all_errors = Array1::zeros(n_total);
+
+    let rho = T::from_f32(exp_doublet_rate).unwrap();
+    let r = T::from_f32((n_sim as f32) / (n_obs as f32)).unwrap();
+    let se_rho = T::from_f32(stddev_doublet_rate).unwrap();
+    let n_float = T::from_usize(k_adj).unwrap();
+    let one = T::one();
+    let two = one + one;
+    let three = two + one;
+
+    for i in 0..n_total {
+        // Create query array for this cell
         let mut query_array = [T::zero(); K];
-        for j in 0..K {
-            query_array[j] = data[(i as usize, j)];
+        for j in 0..K.min(data.ncols()) {
+            query_array[j] = data[(i, j)];
         }
-        let mut n_sim_neigh = 0;
-        let mut n_obs_neigh = 0;
+
         let neighbors = kdtree.nearest_n::<D>(&query_array, k_adj);
-        for neighbor in neighbors {
-            let neighbor_id = neighbor.item;
-            //let neighbor_distance = neighbor.distance; // maybe add some weights later on??? TODO!
-            if ind_obs.contains(&neighbor_id) {
-                n_obs_neigh += 1;
-            } else {
-                n_sim_neigh += 1;
-            }
-        }
-        let rho = exp_doublet_rate;
-        let r = n_sim / n_obs;
-        let n_sim_neigh = n_sim_neigh as f32;
-        let n_obs_neigh = n_obs_neigh as f32;
-        let N = k_adj as f32;
 
-        // Bayesian calcualtion
-        let q = (n_sim_neigh+1.0)/(N+2.0);
-        let ld = q * (rho/r/(1.0-rho-q*(1.0-rho-rho/r))); // formula from the paper and the script
-        let se_q = (q*(1.0-q)/(N+3.0)).sqrt();
-        let sq_rho = stddev_doublet_rate;
-        
+        let n_sim_neigh = neighbors
+            .iter()
+            .filter(|&n| vec_sim[n.item as usize])
+            .count();
+        let n_obs_neigh = neighbors.len() - n_sim_neigh;
 
+        let nd = T::from_usize(n_sim_neigh).unwrap();
+        let ns = T::from_usize(n_obs_neigh).unwrap();
+        let n = T::from_usize(neighbors.len()).unwrap();
+
+        let q = (nd + one) / (n + two);
+        let one_minus_q = one - q;
+        let one_minus_rho = one - rho;
+        let rho_over_r = rho / r;
+        let denominator = one_minus_rho - q * (one_minus_rho - rho_over_r);
+        let ld = q * rho_over_r / denominator;
+
+        let se_q = (q * one_minus_q / (n + three)).sqrt();
+        let term1 = <T as Float>::powi((se_q / q * one_minus_rho), 2);
+        let term2 = <T as Float>::powi(se_rho / rho * one_minus_q, 2);
+        let se_ld = q * rho_over_r / <T as Float>::powi(denominator, 2) * (term1 + term2).sqrt();
+
+        // Store results
+        all_scores[i] = ld;
+        all_errors[i] = se_ld;
     }
-    Ok(())
+
+    // Split results into observed and simulated
+    let mut obs_scores = Array1::zeros(n_obs);
+    let mut obs_errors = Array1::zeros(n_obs);
+    let mut sim_scores = Array1::zeros(n_sim);
+    let mut sim_errors = Array1::zeros(n_sim);
+
+    let mut obs_idx = 0;
+    let mut sim_idx = 0;
+
+    for i in 0..n_total {
+        if vec_sim[i] {
+            // This is a simulated cell
+            sim_scores[sim_idx] = all_scores[i];
+            sim_errors[sim_idx] = all_errors[i];
+            sim_idx += 1;
+        } else {
+            // This is an observed cell
+            obs_scores[obs_idx] = all_scores[i];
+            obs_errors[obs_idx] = all_errors[i];
+            obs_idx += 1;
+        }
+    }
+
+    Ok((obs_scores, sim_scores, obs_errors, sim_errors))
 }
 
 fn array_to_fixed_size_array<A, const N: usize>(vec: &[A]) -> [A; N]
