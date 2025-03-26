@@ -14,7 +14,7 @@ path = "src/main.rs"
 [dependencies]
 anndata = "0.6.1"
 anndata-memory = "0.1.2-alpha.0"
-single_rust = { version = "0.2.3-alpha.2", optional = true }
+single_rust = { version = "0.2.3-alpha.2" }
 ndarray = { version = "0.16.1", features = ["rayon"] }
 nalgebra-sparse = "0.10.0"
 anyhow = "1.0.86"

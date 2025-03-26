@@ -1,4 +1,4 @@
-use crate::utils::generate_random_mask;
+use crate::utils::{find_min_threshold, generate_random_mask};
 use anyhow::anyhow;
 use kiddo::KdTree;
 use kiddo::traits::DistanceMetric;
@@ -14,7 +14,7 @@ use rand::rngs::StdRng;
 use rayon::prelude::*;
 use single_algebra::dimred::pca::{MaskedSparsePCA, MaskedSparsePCABuilder};
 use single_rust::memory::processing::dimred::FeatureSelectionMethod;
-use std::fmt::Debug;
+use std::fmt::{Debug, Display};
 use std::iter::Sum;
 use std::ops::{AddAssign, MulAssign, SubAssign};
 
@@ -264,4 +264,97 @@ where
         arr[i] = val;
     }
     arr
+}
+
+pub(crate) fn call_doublets<T>(
+    obs_scores: &Array1<T>,
+    sim_scores: &Array1<T>,
+    obs_errors: &Array1<T>,
+    threshold: Option<T>,
+    expected_rate: T,
+    verbose: bool,
+) -> anyhow::Result<(Vec<bool>, Array1<T>, T, T, T, T)>
+where
+    T: Float + FromPrimitive + Debug + Display + PartialOrd,
+{
+    let threshold = match threshold {
+        Some(t) => t,
+        None => {
+            // Automatic threshold detection
+            match find_min_threshold(sim_scores, 50) {
+                Ok(t) => {
+                    if verbose {
+                        println!("Automatically set threshold at doublet score = {:.2}", t);
+                    }
+                    t
+                }
+                Err(_) => {
+                    if verbose {
+                        println!(
+                            "Warning: failed to automatically identify doublet score threshold. Please specify a threshold manually."
+                        );
+                    }
+                    return Err(anyhow::anyhow!(
+                        "Failed to automatically identify threshold"
+                    ));
+                }
+            }
+        }
+    };
+
+    let mut z_scores = Array1::zeros(obs_scores.len());
+    for (i, (&score, &error)) in obs_scores.iter().zip(obs_errors.iter()).enumerate() {
+        z_scores[i] = (score - threshold) / error;
+    }
+
+    let predicted_doublets: Vec<bool> = obs_scores.iter().map(|&score| score > threshold).collect();
+
+    let detected_doublet_rate = T::from_usize(predicted_doublets.iter().filter(|&&x| x).count())
+        .unwrap()
+        / T::from_usize(predicted_doublets.len()).unwrap();
+
+    let detectable_doublet_fraction = T::from_usize(
+        sim_scores
+            .iter()
+            .filter(|&&score| score > threshold)
+            .count(),
+    )
+    .unwrap()
+        / T::from_usize(sim_scores.len()).unwrap();
+
+    let overall_doublet_rate = if detectable_doublet_fraction > T::zero() {
+        detected_doublet_rate / detectable_doublet_fraction
+    } else {
+        // Avoid division by zero
+        T::zero()
+    };
+
+    if verbose {
+        println!(
+            "Detected doublet rate = {:.1}%",
+            T::from_f32(100.0).unwrap() * detected_doublet_rate
+        );
+        println!(
+            "Estimated detectable doublet fraction = {:.1}%",
+            T::from_f32(100.0).unwrap() * detectable_doublet_fraction
+        );
+        println!("Overall doublet rate:");
+        println!(
+            "\tExpected   = {:.1}%",
+            T::from_f32(100.0).unwrap() * expected_rate
+        );
+        println!(
+            "\tEstimated  = {:.1}%",
+            T::from_f32(100.0).unwrap() * overall_doublet_rate
+        );
+    }
+
+    Ok((
+        predicted_doublets,
+        z_scores,
+        threshold,
+        detected_doublet_rate,
+        detectable_doublet_fraction,
+        overall_doublet_rate,
+    ))
 }
