@@ -2,6 +2,9 @@
 
 A Rust implementation of the Scrublet algorithm for doublet detection in single-cell RNA-seq data.
 
+> ⚠️ **WARNING**: This project is currently in a preliminary state and needs further testing and validation. It is not yet recommended for production use. Results should be carefully validated against established methods.
+
+
 ## About 📝
 
 StrangerCells is a direct port of the Python-based Scrublet algorithm to Rust, with a focus on performance and memory efficiency. It detects doublets (two cells captured as one) in single-cell RNA sequencing data using a nearest-neighbor classifier approach.
@@ -92,3 +95,4 @@ All rights reserved.
 ## Acknowledgments 👏
 
 - Original Scrublet algorithm by Samuel L. Wolock, et al.
+- SingleRust ecosystem for Rust-based single-cell analysis
